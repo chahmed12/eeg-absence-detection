@@ -5,6 +5,14 @@ pour éviter la duplication dans test_features.py, test_models.py, etc.
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Garantit que la racine du projet est dans sys.path quel que soit l'environnement ou la méthode d'appel
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import numpy as np
 import pandas as pd
 import pytest
