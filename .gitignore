@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.py[cod]
+*.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data (NEVER COMMIT)
+*.mat
+*.xlsx
+*.xls
+CRISES\ ABSENCES/
+CRISES ABSENCES/
+data/*.mat
+data/*.xlsx
+data/*.xls
+
+# Cache & generated artifacts
+cache/
+*.npy
+*.parquet
+*.csv
+pipeline.log
+pipeline.err
+submission_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Reports / heavy docs
+report/RAPPORT_COMPLET.md
+report/RAPPORT_TECHNIQUE.md
+report/RAPPORT_FINAL.pdf
+report/build_report_pdf.py
+report/build_revision_xlsx.py
+report/_report_build.html
+report/PLAN_RAPPORT.md
+report/PLAN_REVISION_PROJET.xlsx
+report/FICHE_SOUTENANCE.md
+report/GUIDE_FICHIERS.md
+scripts_step6_report_figures.py
+
+# Tests & Coverage
+.pytest_cache/
+.coverage
+coverage.xml
+report/coverage_html/
+
+# AI assistants
+.claude/
+.agents/
+.gemini/
+
+# Keep useful small docs/figures
+!report/RESULTS_SUMMARY.md
+!report/figures/
+!report/figures/**

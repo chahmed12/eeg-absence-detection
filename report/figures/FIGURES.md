@@ -1,0 +1,15 @@
+﻿# Figures exportées
+- 01_cohort_timeline.png
+- 01_duration_violin.png
+- 01_heatmap.png
+- 01_interval_hist.png
+- 01_multichannel_zoom.png
+- 01_signal_overview.png
+- 01_spectrogram.png
+- 04_detection_210914B-A.png
+- 04_detection_230102B-F.png
+- 04_metric_vs_seuil.png
+- 04_probability_210914B-A.png
+- 05_channel_topomap.png
+- 05_top_features.png
+- 05_window_overlap_sensitivity.png
