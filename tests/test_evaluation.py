@@ -221,3 +221,95 @@ def test_pr_curve_data_recall_in_range():
     recall, precision = pr_curve_data(y, scores)
     assert (recall >= 0).all() and (recall <= 1).all()
     assert (precision >= 0).all() and (precision <= 1).all()
+
+
+# ---------------------------------------------------------------------------
+# Post-traitement causal (zéro fuite du futur)
+# ---------------------------------------------------------------------------
+def test_smooth_scores_causal_no_future_leakage():
+    """Un changement sur un échantillon futur ne doit jamais altérer le passé."""
+    from src.postprocess import smooth_scores, smooth_scores_causal
+
+    base = np.array([0.1, 0.2, 0.3, 0.2, 0.1, 0.1, 0.1])
+    modified = base.copy()
+    modified[-1] = 0.99  # pic dans le futur
+
+    # Causal : le passé i=0..4 doit rester strictement invariant
+    c_base = smooth_scores_causal(base, size=3)
+    c_mod = smooth_scores_causal(modified, size=3)
+    assert np.allclose(c_base[:5], c_mod[:5]), "Fuite du futur détectée dans le filtre causal !"
+
+    # Non-causal : le filtre médian centré diffuse le pic vers le passé
+    nc_base = smooth_scores(base, size=3)
+    nc_mod = smooth_scores(modified, size=3)
+    assert not np.allclose(nc_base, nc_mod)
+
+
+def test_postprocess_causal_timestamps():
+    """En mode causal, l'alarme est émise après réception de la fenêtre (t_start + window_sec)."""
+    from src.postprocess import postprocess
+
+    times = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
+    scores = np.array([0.1, 0.8, 0.85, 0.9, 0.1])
+
+    # Mode hors-ligne standard : daté à t_start
+    _, iv_std = postprocess(times, scores, threshold=0.5, smooth_size=1, causal=False)
+    assert iv_std[0][0] == 1.0
+
+    # Mode temps réel causal : daté à t_start + 2.0s
+    _, iv_causal = postprocess(times, scores, threshold=0.5, smooth_size=1, causal=True, window_sec=2.0)
+    assert iv_causal[0][0] == 3.0  # 1.0 + 2.0s
+
+
+def test_causal_postprocess_strict_non_anticipation():
+    """Preuve de non-anticipation : modifier le futur ne modifie jamais les alarmes déjà émises."""
+    from src.postprocess import postprocess
+
+    rng = np.random.default_rng(123)
+    times = np.arange(0.0, 30.0, 1.0)
+    # Crise apparaissant de t=10 à t=15
+    scores = np.full(len(times), 0.1)
+    scores[10:16] = 0.95
+
+    # Exécution causale standard
+    _, iv_ref = postprocess(times, scores, threshold=0.5, smooth_size=5, min_dur_s=2.0, causal=True, window_sec=2.0)
+    assert len(iv_ref) >= 1
+    t_alarm_ref = iv_ref[0][0]
+
+    # Modification drastique des scores futurs à partir de t=18 (après l'émission de l'alarme)
+    scores_mutated = scores.copy()
+    scores_mutated[18:] = rng.uniform(0.0, 1.0, size=len(scores) - 18)
+
+    _, iv_mut = postprocess(times, scores_mutated, threshold=0.5, smooth_size=5, min_dur_s=2.0, causal=True, window_sec=2.0)
+    assert len(iv_mut) >= 1
+    t_alarm_mut = iv_mut[0][0]
+
+    # L'instant d'alarme passée doit être strictement identique
+    assert t_alarm_ref == t_alarm_mut, f"Violation de non-anticipation : {t_alarm_ref} != {t_alarm_mut}"
+
+
+def test_merge_gaps_past_end_not_changed_by_future():
+    """En mode causal, la fin d'une alarme deja emise ne depend pas des scores futurs."""
+    from src.postprocess import postprocess
+
+    times = np.arange(0.0, 21.0, 1.0)
+    base = np.zeros(len(times))
+    base[5:8] = 0.95
+    base[12:15] = 0.95
+
+    mutated = base.copy()
+    mutated[9] = 0.95
+
+    _, intervals_base = postprocess(
+        times, base, threshold=0.5, smooth_size=1, min_gap_s=2.0,
+        min_dur_s=2.0, causal=True, window_sec=0.0,
+    )
+    _, intervals_mutated = postprocess(
+        times, mutated, threshold=0.5, smooth_size=1, min_gap_s=2.0,
+        min_dur_s=2.0, causal=True, window_sec=0.0,
+    )
+
+    assert intervals_base[0] == intervals_mutated[0], (
+        "La fin de l'alarme passee a change a cause d'un score futur : "
+        f"{intervals_base[0]} != {intervals_mutated[0]}"
+    )

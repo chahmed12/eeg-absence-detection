@@ -19,6 +19,7 @@ from src.models import (
     get_models,
     group_kfold_splits,
     lopo_folds,
+    patient_validation_split,
     random_stratified_split,
     run_protocol,
     summarise,
@@ -145,6 +146,25 @@ def test_group_kfold_no_overlap(df):
     for fold in folds:
         common = np.intersect1d(fold.train_idx, fold.test_idx)
         assert len(common) == 0
+
+
+def test_patient_validation_split_disjoint_patients(df):
+    inner_train, inner_val = patient_validation_split(df, df.index.to_numpy(), seed=0)
+    train_patients = set(df.iloc[inner_train]["patient"])
+    val_patients = set(df.iloc[inner_val]["patient"])
+    assert train_patients.isdisjoint(val_patients)
+    assert len(inner_train) + len(inner_val) == len(df)
+
+
+def test_patient_validation_split_val_is_annotated(df):
+    _, inner_val = patient_validation_split(df, df.index.to_numpy(), seed=0)
+    assert len(inner_val) > 0
+    assert (df.iloc[inner_val]["label"] == 1).any()
+
+
+def test_patient_validation_split_keeps_positive_in_train(df):
+    inner_train, _ = patient_validation_split(df, df.index.to_numpy(), seed=0)
+    assert (df.iloc[inner_train]["label"] == 1).any()
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 """Tests du pré-traitement du signal EEG.
 
-Vérifie le filtrage passe-bande Butterworth (0,5–40 Hz, phase nulle) et le
-coupe-bande notch à 50 Hz, ainsi que le point d'entrée preprocess_signal().
+Vérifie le filtrage passe-bande Butterworth causal (0,5–40 Hz), le coupe-bande
+notch à 50 Hz et le point d'entrée preprocess_signal().
 """
 from __future__ import annotations
 
@@ -85,12 +85,11 @@ def test_notch_attenuates_50hz():
     # On court-circuite le passe-bande en fixant des bornes larges
     out = bandpass_notch(sig_50, fs=FS, lowcut=0.5, highcut=60.0,
                          notch_freq=50.0, notch_q=30.0)
-    # Énergie résiduelle à 50 Hz doit être très faible
-    freqs, psd = sp_signal.periodogram(out, fs=FS)
+    # Énergie résiduelle à 50 Hz doit être très faible devant l'entrée
+    freqs, psd_in = sp_signal.periodogram(sig_50, fs=FS)
+    _, psd_out = sp_signal.periodogram(out, fs=FS)
     idx_50 = np.argmin(np.abs(freqs - 50.0))
-    idx_3 = np.argmin(np.abs(freqs - 3.0))
-    # La puissance à 50 Hz doit être bien inférieure à celle à 3 Hz
-    assert psd[idx_50] < psd[idx_3] * 10
+    assert psd_out[idx_50] < 0.01 * psd_in[idx_50]
 
 
 # ---------------------------------------------------------------------------
@@ -142,3 +141,18 @@ def test_preprocess_multichannel(monkeypatch):
     out = preprocess_signal(sig, fs=FS)
     assert out.shape == sig.shape
     assert out.dtype == np.float32
+
+
+def test_bandpass_notch_past_not_changed_by_future():
+    """Un changement futur ne doit pas modifier le passé d'un filtre temps réel."""
+    rng = np.random.default_rng(0)
+    base = rng.normal(0.0, 1.0, N).astype(np.float32)
+    modified = base.copy()
+    modified[-20:] += 100.0  # transitoire futur
+
+    out_base = bandpass_notch(base, fs=FS)
+    out_modified = bandpass_notch(modified, fs=FS)
+
+    assert np.allclose(out_base[:-100], out_modified[:-100], atol=1e-6), (
+        "Le filtrage amont dépend d'échantillons futurs : pipeline non causal"
+    )

@@ -5,16 +5,20 @@ brute atteint ~1e8, soit des amplitudes non physiologiques) et du bruit haute
 fréquence (activité musculaire, ronflement du secteur à 50 Hz). On applique
 donc, **avant tout fenêtrage ou extraction de caractéristiques** :
 
-1. un **passe-bande** Butterworth (0,5–40 Hz) en phase nulle (``filtfilt``) :
+1. un **passe-bande** Butterworth (0,5–40 Hz) **causal** (``sosfilt``) :
    il retire l'offset DC et la dérive lente (< 0,5 Hz) ainsi que le bruit
    haute fréquence (> 40 Hz), tout en préservant la décharge pointe-onde de
    l'absence (~3 Hz) ;
-2. un **coupe-bande** (notch) à la fréquence du secteur (50 Hz) pour éliminer
-   le ronflement de la ligne électrique.
+2. un **coupe-bande** (notch) causal à la fréquence du secteur (50 Hz) pour
+   éliminer le ronflement de la ligne électrique.
 
-Le filtrage est appliqué **canal par canal** (passe-bande puis notch). Sans ce
-pré-traitement, les features d'énergie dominent artificiellement et le spectre
-est pollué, ce qui biaise l'interprétation des bandes de fréquences.
+Le filtrage est appliqué **canal par canal** (passe-bande puis notch). Chaque
+échantillon de sortie ne dépend que des échantillons présents ou passés : le
+pipeline peut donc être exécuté en flux continu. L'état initial est amorcé avec
+le premier échantillon pour limiter le transitoire de démarrage, sans utiliser
+d'échantillon futur. Sans ce pré-traitement, les features d'énergie dominent
+artificiellement et le spectre est pollué, ce qui biaise l'interprétation des
+bandes de fréquences.
 """
 
 from __future__ import annotations
@@ -39,6 +43,18 @@ def _sos_notch(fs: float, freq: float, q: float) -> np.ndarray:
     return sp_signal.tf2sos(b, a)
 
 
+def _sosfilt_causal(sos: np.ndarray, x: np.ndarray) -> np.ndarray:
+    """Filtre SOS causal, amorcé sur le premier échantillon.
+
+    ``sosfilt`` est un filtre récursif qui n'utilise que l'échantillon courant
+    et les états passés. L'amorçage par ``sosfilt_zi * x[0]`` évite un
+    transitoire artificiel sur l'offset DC initial sans recourir au futur.
+    """
+    zi = sp_signal.sosfilt_zi(sos) * float(x[0])
+    y, _ = sp_signal.sosfilt(sos, x, zi=zi)
+    return y
+
+
 def bandpass_notch(
     sig: np.ndarray,
     fs: float = config.FS,
@@ -48,7 +64,7 @@ def bandpass_notch(
     notch_q: float = config.NOTCH_Q,
     order: int = config.FILTER_ORDER,
 ) -> np.ndarray:
-    """Applique un passe-bande (phase nulle) puis un notch à chaque canal.
+    """Applique un passe-bande causal puis un notch causal à chaque canal.
 
     Args:
         sig: signal (n_échantillons, n_canaux).
@@ -73,8 +89,8 @@ def bandpass_notch(
         col = x[:, c]
         if not np.all(np.isfinite(col)):
             col = np.nan_to_num(col, nan=0.0, posinf=0.0, neginf=0.0)
-        y = sp_signal.sosfiltfilt(sos_bp, col)
-        y = sp_signal.sosfiltfilt(sos_no, y)
+        y = _sosfilt_causal(sos_bp, col)
+        y = _sosfilt_causal(sos_no, y)
         out[:, c] = y
 
     out = out.astype(np.float32)

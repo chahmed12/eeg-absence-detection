@@ -153,6 +153,51 @@ def group_kfold_splits(df: pd.DataFrame, n_splits: int = 5, seed: int = config.R
     return folds
 
 
+def patient_validation_split(
+    df: pd.DataFrame,
+    train_idx: np.ndarray,
+    val_fraction: float = 0.25,
+    seed: int = config.RANDOM_SEED,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Sépare un train en train interne / validation interne **par patient**.
+
+    La validation ne contient que des patients annotés (au moins une crise),
+    afin que la sélection du checkpoint et du seuil repose sur des événements
+    réels. Les patients de validation sont retirés du train interne : aucun
+    patient ne fuit entre les deux sous-ensembles.
+
+    Args:
+        df: DataFrame avec au moins ``patient`` et ``label``.
+        train_idx: indices positionnels du train externe.
+        val_fraction: proportion de patients annotés réservés à la validation.
+        seed: graine du tirage des patients.
+
+    Returns:
+        (inner_train_idx, inner_val_idx), indices positionnels triés.
+    """
+    positions = np.asarray(train_idx, dtype=int)
+    if len(positions) == 0:
+        raise ValueError("train_idx est vide")
+    patients = df["patient"].to_numpy()[positions]
+    labels = df["label"].to_numpy()[positions]
+
+    annotated = np.array(sorted(set(patients[labels == 1])))
+    if len(annotated) < 2:
+        raise ValueError("Au moins deux patients annotés sont requis pour créer une validation interne")
+
+    rng = np.random.default_rng(seed)
+    shuffled = annotated.copy()
+    rng.shuffle(shuffled)
+    n_val = max(1, int(round(len(annotated) * val_fraction)))
+    n_val = min(n_val, len(annotated) - 1)  # garder au moins un patient annoté en train
+    val_patients = set(shuffled[:n_val].tolist())
+
+    is_val = np.array([pid in val_patients for pid in patients])
+    inner_val_idx = np.sort(positions[is_val])
+    inner_train_idx = np.sort(positions[~is_val])
+    return inner_train_idx, inner_val_idx
+
+
 # ---------------------------------------------------------------------------
 # Modèles
 # ---------------------------------------------------------------------------

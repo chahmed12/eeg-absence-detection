@@ -84,6 +84,43 @@ def event_metrics(
     }
 
 
+def event_metrics_pooled(
+    seizures: pd.DataFrame,
+    detected_by_patient: dict[str, list[tuple[float, float]]],
+    durations: dict[str, float],
+    tolerance_s: float = config.EVENT_TOLERANCE_S,
+) -> dict:
+    """Metriques evenementielles agregees, avec latence ponderee par evenement."""
+    all_latences = []
+    tp = fp = fn = n_true = 0
+    total_s = 0.0
+    for pid, detected in detected_by_patient.items():
+        true = seizures[seizures["Patient"].astype(str) == str(pid)]
+        true_events = list(map(tuple, true[["Debut_Sec", "Fin_Sec"]].to_numpy()))
+        m = match_events(true_events, list(detected), tolerance_s)
+        all_latences.append(m["latences"])
+        tp += m["tp"]
+        fp += m["fp"]
+        fn += m["fn"]
+        n_true += len(true_events)
+        total_s += durations.get(pid, 0.0)
+
+    lat = np.concatenate(all_latences) if all_latences else np.asarray([])
+    heures = total_s / 3600.0 if total_s > 0 else np.nan
+    return {
+        "n_crises_reelles": n_true,
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "taux_detection": tp / n_true if n_true else np.nan,
+        "fausses_alarmes_par_h": fp / heures if heures and heures > 0 else np.nan,
+        "latence_moy_s": float(np.mean(lat)) if len(lat) else np.nan,
+        "latence_std_s": float(np.std(lat)) if len(lat) else np.nan,
+        "n_detections": tp + fp,
+        "duree_totale_h": heures,
+    }
+
+
 def event_metrics_by_patient(
     seizures: pd.DataFrame,
     detected_by_patient: dict[str, list[tuple[float, float]]],

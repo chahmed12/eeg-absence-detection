@@ -1,3 +1,37 @@
+# Résultats P0 — protocole causal et strictement imbriqué
+
+> [!IMPORTANT]
+> Résultats finaux après régénération complète des caches `v3_causal`, filtrage amont causal (`sosfilt`), post-traitement causal et validation interne stricte. Le pli de test n'est jamais utilisé pour le seuil, l'early stopping ou la sélection de modèle.
+
+## P0-1) LightGBM — EXP-00 (260 features, 8 canaux)
+- Seuil par pli : 0,30 / 0,50 / 0,70 / 0,90 / 0,75 — moyenne **0,63 ± 0,23**
+- F1 fenêtre : **0,705 poolé**, **0,700 ± 0,121** (moyenne des plis)
+- Précision / rappel poolés : **0,706 / 0,703** ; PR-AUC poolé : **0,652**
+- Événements : **77/82 crises détectées (93,9 %)**, 40 FP, 5 FN, 9,23 h
+- FA/h : **4,33 hors-ligne**, **4,55 causal**
+- Latence causale pondérée par événement : **4,46 s** (77 événements)
+
+## P0-2) Deep Learning — validation interne 25 % des patients
+| Expérience | Modèle | F1 fenêtre | Détection | FA/h | Latence causale |
+|---|---|---|:---:|:---:|:---:|
+| EXP-01 | CNN 1D temporel | 0,488 ± 0,119 | 96,3 % | 19,50 | 3,33 ± 3,81 s |
+| EXP-02 | CNN spatio-temporel | 0,527 ± 0,140 | 93,9 % | 19,93 | 2,96 ± 3,99 s |
+| EXP-03 | EEGNet, seuil 0,5 | 0,522 ± 0,100 | 93,9 % | 11,48 | 1,19 ± 8,85 s |
+| EXP-04 | EEGNet, seuil calibré | **0,643 ± 0,077** | **93,9 % (77/82)** | **8,88** | **3,86 s** |
+
+- EXP-04 : τ* = **0,77 ± 0,15**, sélectionné sur la validation interne de chaque pli. Moyenne des plis : 92,4 % ± 11,1 % et 8,29 ± 6,05 FA/h. Le balayage OOF global (F1 0,673 à τ=0,94) est optimiste et n'est pas le résultat principal.
+- EXP-03 : latence élevée en écart-type à cause d'un outlier à 26 s (`230515B-G`).
+- Les FA/h EXP-01 à EXP-04 utilisent le post-traitement causal et 9,23 h (22 enregistrements).
+
+**Décision finale** : LightGBM EXP-00 est le modèle de référence retenu pour la détection ; EEGNet EXP-04 est l'extension Deep Learning retenue pour le monitoring embarqué. EEGNet est plus compact et plus rapide de bout en bout, mais LightGBM reste plus performant et émet moins de fausses alarmes.
+
+---
+
+# Archive historique (avant P0)
+
+> [!WARNING]
+> Document historique (12/10/2026). Les métriques FA/h de la section 4 utilisent 19 patients annotés / 8,06 h (RandomForest LOPO) et ne sont pas comparables aux résultats GroupKFold sur 22 enregistrements / 9,23 h. Les valeurs 86,6 % / 3,35 FA/h ne sont pas reproduites par les artefacts actuels. Voir `report/EXPERIMENTS_LOG.md` pour les résultats P0.
+
 ## 1) Données
 - Patients annotés : 19
 - Crises : 82

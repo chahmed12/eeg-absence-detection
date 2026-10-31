@@ -25,6 +25,7 @@ mne>=1.6             # cartes topographiques du scalp (montage 10-20)
 imbalanced-learn>=0.12
 xgboost>=2.0
 lightgbm>=4.3
+torch>=2.0
 
 # --- Explicabilité / réduction de dimension ---
 shap>=0.45

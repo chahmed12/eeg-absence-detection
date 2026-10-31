@@ -76,13 +76,13 @@ EEG_HIGHCUT: float = 40.0
 NOTCH_FREQ: float = 50.0
 #: Facteur de qualité du filtre coupe-bande (plus grand = bande plus étroite).
 NOTCH_Q: float = 30.0
-#: Ordre du filtre Butterworth passe-bande (appliqué en phase nulle/filtfilt).
+#: Ordre du filtre Butterworth passe-bande (appliqué en causal, ``sosfilt``).
 FILTER_ORDER: int = 4
 
 #: Version du cache signal : à incrémenter si le pré-traitement change, pour
 #: invalider les ``.npy`` déjà convertis (sinon un ancien cache non filtré
 #: serait réutilisé silencieusement).
-SIGNAL_CACHE_VERSION: str = "v2_filtered"
+SIGNAL_CACHE_VERSION: str = "v3_causal"
 
 
 # ---------------------------------------------------------------------------

@@ -44,9 +44,26 @@ def get_features() -> pd.DataFrame:
     return pd.read_parquet(config.FEATURES_PARQUET)
 
 
+def _read_prediction_file(path: Path) -> pd.DataFrame:
+    return pd.read_pickle(path) if path.suffix == ".pkl" else pd.read_parquet(path)
+
+
 @st.cache_data(show_spinner=False)
-def get_predictions() -> pd.DataFrame:
-    return pd.read_parquet(config.PREDICTIONS_PARQUET)
+def get_predictions(model_name: str = "LightGBM") -> pd.DataFrame:
+    if "EEGNet" in model_name:
+        candidates = [
+            config.CACHE_DIR / "predictions_eegnet.parquet",
+            config.CACHE_DIR / "experiments" / "EXP-03_oof_predictions.pkl",
+        ]
+    else:
+        candidates = [
+            config.CACHE_DIR / "experiments" / "predictions_lightgbm_oof.parquet",
+            config.PREDICTIONS_PARQUET,
+        ]
+    for path in candidates:
+        if path.exists():
+            return _read_prediction_file(path)
+    raise FileNotFoundError(f"Prédictions introuvables pour {model_name}")
 
 
 @st.cache_data(show_spinner=False)
@@ -78,11 +95,11 @@ def downsample(t: np.ndarray, x: np.ndarray, n_pixels: int = 4000):
 
 @st.cache_data(show_spinner=False)
 def get_error_analysis(threshold: float = 0.5, smooth_size: int = 5,
-                       min_dur_s: float = 2.0):
+                       min_dur_s: float = 2.0, model_name: str = "LightGBM"):
     """Analyse d'erreurs TP/FP/FN/TN — niveau fenêtre ET niveau crise (Q15)."""
     from src.evaluation import match_events
 
-    preds = get_predictions().sort_values(["patient", "t_start"])
+    preds = get_predictions(model_name).sort_values(["patient", "t_start"])
     sz = get_seizures()
 
     # --- niveau fenetre ---
@@ -199,6 +216,13 @@ patients = sorted(files)
 patient = st.sidebar.selectbox("Patient", patients)
 rec_t0, rec_names, rec_sig, rec_fs = get_signal(files[patient])
 
+model_choice = st.sidebar.radio(
+    "Modèle de détection",
+    ["LightGBM (Baseline - Features manuelles)", "EEGNet (Deep Learning - Signal brut)"],
+    index=0,
+    help="Choisissez le moteur de prédiction pour les visualisations et analyses d'erreurs."
+)
+
 st.sidebar.metric("Patients", len(patients))
 st.sidebar.metric("Crises annotées", int(len(seizures)))
 st.sidebar.caption(f"Patient courant : durée {rec_sig.shape[0]/rec_fs:.0f} s, "
@@ -221,235 +245,32 @@ with tabs[0]:
     c4.metric("Durée moyenne", f"{seizures.Duree_Sec.mean():.1f} s")
 
     durees = {pid: get_signal(files[pid])[2].shape[0] / get_signal(files[pid])[3] for pid in patients}
-    st.subheader("Frise chronologique de la cohorte")
-    fig = viz.plot_cohort_timeline(durees, seizures)
-    st.pyplot(fig)
-    import matplotlib.pyplot as plt
-    plt.close(fig)
+    st.subheader("⚖️ Matrice d'Arbitrage : 7 Dimensions d'Ingénierie (LightGBM vs EEGNet)")
+    st.markdown("""
+    Le choix de l'architecture ne se résume pas à sélectionner le meilleur $F_1$-score au niveau fenêtre.
+    Il découle d'un arbitrage rigoureux sur **7 dimensions d'ingénierie**, mesurées sous le même protocole de validation imbriquée aveugle (*Nested Cross-Validation* à 5 plis GroupKFold) :
+    """)
+    crit_df = pd.DataFrame([
+        {"Dimension d'ingénierie": "1. Détection clinique (événements)", "LightGBM (260 features)": "93,9 % (77/82, seuil interne strict)", "EEGNet (8 canaux bruts)": "93,9 % (77/82, seuil τ*=0,77 ± 0,15)", "Analyse de l'arbitrage": "Détection équivalente ; LightGBM garde un meilleur F1 fenêtre"},
+        {"Dimension d'ingénierie": "2. Fausses alertes / heure", "LightGBM (260 features)": "4,55 FA/h causal (4,33 hors-ligne)", "EEGNet (8 canaux bruts)": "8,88 FA/h causal (8,45 hors-ligne)", "Analyse de l'arbitrage": "LightGBM émet environ deux fois moins de fausses alarmes"},
+        {"Dimension d'ingénierie": "3. F1-Score au niveau fenêtre", "LightGBM (260 features)": "0,705 poolé (0,700 ± 0,121)", "EEGNet (8 canaux bruts)": "0,643 ± 0,077", "Analyse de l'arbitrage": "Avantage LightGBM (a priori fréquentiels des 260 descripteurs)"},
+        {"Dimension d'ingénierie": "4. Latence causale en flux continu", "LightGBM (260 features)": "4,46 s", "EEGNet (8 canaux bruts)": "3,86 s", "Analyse de l'arbitrage": "Latences pondérées par événement, filtrage amont et post-traitement causaux"},
+        {"Dimension d'ingénierie": "5. Temps calcul CPU (de bout en bout)", "LightGBM (260 features)": "16,81 ± 5,33 ms (médiane)", "EEGNet (8 canaux bruts)": "10,35 ± 4,82 ms (médiane)", "Analyse de l'arbitrage": "EEGNet ~1,6x à 1,8x plus rapide de bout en bout (1,0 % vs 1,7 % du budget de 1 000 ms)"},
+        {"Dimension d'ingénierie": "6. Empreinte mémoire des poids", "LightGBM (260 features)": "~1,2 Mo (100 arbres)", "EEGNet (8 canaux bruts)": "5,96 Ko (1 489 paramètres float32)", "Analyse de l'arbitrage": "Poids seuls ~200x plus compacts (hors runtime d'exécution Python ~150 Mo)"},
+        {"Dimension d'ingénierie": "7. Intégration et maintenance", "LightGBM (260 features)": "260 features manuelles (scipy, pywt)", "EEGNet (8 canaux bruts)": "End-to-End direct sur signal brut (8 canaux), 130 tests P0", "Analyse de l'arbitrage": "Candidat embarqué, à confirmer sur cible matérielle"}
+    ])
+    st.table(crit_df)
+    st.info("💡 **Décision finale** : LightGBM EXP-00 est retenu comme modèle de référence pour la détection ; EEGNet EXP-04 est l'extension Deep Learning retenue pour le monitoring embarqué. EEGNet est plus compact et plus rapide de bout en bout, mais LightGBM reste plus performant et émet moins de fausses alarmes. Ce système reste un prototype académique sur 19 patients pédiatriques, non un dispositif médical certifié.")
 
-    colA, colB = st.columns(2)
-    with colA:
-        fig = viz.plot_duration_violin(seizures)
-        st.pyplot(fig); plt.close(fig)
-    with colB:
-        inter = viz.inter_crisis_intervals(seizures)
-        fig = viz.plot_interval_hist(inter)
-        st.pyplot(fig); plt.close(fig)
-
-    st.subheader("Inventaire des signaux EEG (Partie I / Q1)")
-    inv = []
-    for pid, fpath in files.items():
-        try:
-            r = get_signal(fpath)
-            rec_t, rec_n, rec_s, rec_fs = r
-            inv.append({"Patient": pid, "Fichier": Path(fpath).name, "N_lignes": rec_s.shape[0],
-                        "N_canaux": rec_s.shape[1], "Durée (s)": rec_s.shape[0]/rec_fs, "fs (Hz)": rec_fs,
-                        "Canaux EEG": sum(1 for c in rec_n if str(c).startswith("EEG"))})
-        except Exception as e:
-            inv.append({"Patient": pid, "Fichier": Path(fpath).name, "Erreur": str(e)})
-    st.dataframe(pd.DataFrame(inv), width='stretch')
-
-
-# ---------------------------------------------------------------------------
-# Onglet 2 — Explorateur patient
-# ---------------------------------------------------------------------------
-with tabs[1]:
-    st.header(f"Explorateur — {patient}")
-    eeg_chans = [c for c in rec_names if c.startswith("EEG")]
-    chans = st.multiselect("Canaux", rec_names, default=eeg_chans[:4], key="expl_chans")
-    dur = rec_sig.shape[0] / rec_fs
-    fen = st.slider("Zoom temporel (s)", 0.0, float(dur), (max(0.0, 30.0), min(dur, 60.0)))
-    t = np.arange(rec_sig.shape[0]) / rec_fs
-    mask = (t >= fen[0]) & (t <= fen[1])
-    sel = seizures[seizures["Patient"].astype(str) == patient]
-
-    if chans:
-        fig = go.Figure()
-        for i, ch in enumerate(chans):
-            c = rec_names.index(ch)
-            tt, xx = downsample(t[mask], rec_sig[mask, c])
-            fig.add_trace(go.Scatter(x=tt, y=xx - i * 200, name=ch, line=dict(width=1)))
-        for _, r in sel.iterrows():
-            if r["Fin_Sec"] >= fen[0] and r["Debut_Sec"] <= fen[1]:
-                fig.add_vrect(x0=max(r["Debut_Sec"], fen[0]), x1=min(r["Fin_Sec"], fen[1]),
-                              fillcolor="red", opacity=0.2, line_width=0)
-        fig.update_layout(height=400, title="Signal multi-canaux (crises en rouge)",
-                          xaxis_title="Temps (s)", yaxis_title="Amplitude (µV)")
-        st.plotly_chart(fig, width='stretch')
-
-    st.subheader("Spectrogramme")
-    sp_ch = st.selectbox("Canal", rec_names, index=rec_names.index("EEGCz") if "EEGCz" in rec_names else 0)
-    fig = viz.plot_spectrogram(rec_sig, rec_names, sp_ch, rec_fs, fmax=20, seizures=sel)
-    st.pyplot(fig); plt.close(fig)
-
-
-# ---------------------------------------------------------------------------
-# Onglet 3 — Comparaison
-# ---------------------------------------------------------------------------
-with tabs[2]:
-    st.header("Comparaison entre patients")
-    comp_patients = st.multiselect("Patients à comparer", patients, default=patients[:3])
-    comp_ch = st.selectbox("Canal commun", [c for c in config.COMMON_EEG_CHANNELS], index=0)
-    fig = go.Figure()
-    for i, pid in enumerate(comp_patients):
-        _, names, sig, fs = get_signal(files[pid])
-        if comp_ch not in names:
-            continue
-        t = np.arange(sig.shape[0]) / fs
-        tt, xx = downsample(t, sig[:, names.index(comp_ch)])
-        fig.add_trace(go.Scatter(x=tt, y=xx, name=pid, line=dict(width=0.7)))
-    fig.update_layout(height=400, title=f"Canal {comp_ch} — plusieurs patients",
-                      xaxis_title="Temps (s)", yaxis_title="Amplitude (µV)")
-    st.plotly_chart(fig, width='stretch')
-
-    st.subheader("Moyenne événementielle (alignement des crises, ±30 s)")
-    ev_ch = st.selectbox("Canal (événementiel)", eeg_chans, index=0, key="ev_ch")
-    if st.button("Calculer la moyenne événementielle"):
-        half = int(30 * rec_fs)
-        curves = []
-        for _, r in seizures.iterrows():
-            pid = str(r["Patient"])
-            if pid not in files:
-                continue
-            _, names, sig, fs = get_signal(files[pid])
-            if ev_ch not in names:
-                continue
-            c = names.index(ev_ch)
-            s0 = int(round(r["Debut_Sec"] * fs))
-            if s0 - half < 0 or s0 + half >= sig.shape[0]:
-                continue
-            seg = sig[s0 - half:s0 + half, c].astype(float)
-            curves.append(seg - seg.mean())
-        if curves:
-            M = np.mean(curves, axis=0)
-            tt = np.arange(-half, half) / rec_fs
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=tt, y=M, name="Moyenne"))
-            fig.add_trace(go.Scatter(x=tt, y=np.std(curves, axis=0), name="Écart-type",
-                                     line=dict(dash="dot")))
-            fig.add_vline(x=0, line_dash="dash", line_color="red")
-            fig.update_layout(height=400, xaxis_title="Temps relatif au début (s)",
-                              yaxis_title="Amplitude (µV)")
-            st.plotly_chart(fig, width='stretch')
-            st.caption(f"{len(curves)} crises alignées.")
-        else:
-            st.warning("Aucune crise exploitable pour ce canal.")
-
-
-# ---------------------------------------------------------------------------
-# Onglet 4 — Dataset & corrélations
-# ---------------------------------------------------------------------------
-with tabs[3]:
-    st.header("Dataset — fenêtres, classes, corrélations")
-    fdf = get_features()
-    feats = [c for c in fdf.columns if c not in ("patient", "label", "t_start")]
-    n_pos = int((fdf["label"] == 1).sum())
-    n_neg = int((fdf["label"] == 0).sum())
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Fenêtres (2 s)", f"{len(fdf):,}".replace(",", " "))
-    k2.metric("Features", len(feats))
-    k3.metric("Patients", fdf["patient"].nunique())
-    k4.metric("Classe crise", f"{100 * n_pos / len(fdf):.2f} %")
-
-    st.subheader("Répartition des classes (déséquilibre)")
-    figc = go.Figure(data=[
-        go.Bar(x=["Hors-crise (0)", "Crise (1)"], y=[n_neg, n_pos],
-               marker_color=["#94a3b8", "#dc2626"],
-               text=[str(n_neg), str(n_pos)], textposition="outside")])
-    figc.update_layout(height=300, yaxis_title="Nombre de fenêtres",
-                       title="~96 % de fenêtres hors-crise")
-    st.plotly_chart(figc, width='stretch')
-    st.caption("Déséquilibre structurel : l'accuracy d'un modèle « tout 0 » atteint "
-               "déjà {:.1f} %. On utilise F1, MCC et AUPRC.".format(100 * n_neg / len(fdf)))
-
-    st.subheader("Distribution d'une feature selon la classe")
-    c1, c2 = st.columns(2)
-    sel_feat = c1.selectbox("Feature", feats,
-                            index=feats.index("EEGCz__energy") if "EEGCz__energy" in feats else 0,
-                            key="ds_feat")
-    sub = fdf[[sel_feat, "label"]].copy()
-    if len(sub) > 6000:
-        sub = sub.sample(6000, random_state=0)
-    figf = go.Figure()
-    for lab, col in ((0, "#94a3b8"), (1, "#dc2626")):
-        figf.add_trace(go.Histogram(x=sub.loc[sub["label"] == lab, sel_feat],
-                                    name="classe " + str(lab), opacity=0.65,
-                                    marker_color=col, nbinsx=60))
-    figf.update_layout(height=340, barmode="overlay",
-                       xaxis_title=sel_feat, yaxis_title="Effectif")
-    st.plotly_chart(figf, width='stretch')
-
-    st.subheader("Matrice de corrélations (Pearson)")
-    familles = {
-        "Temporelles (mean/std/var/min/max/amp/rms/energy)": ["__mean", "__std", "__var", "__min", "__max", "__amp", "__rms", "__energy"],
-        "Spectralles (bandes de puissance)": ["__pow_", "__rel_"],
-        "Complexité (Hjorth, entropies, ondelettes)": ["__hjorth", "__entropy", "__perm_entropy", "__wav_", "__skew", "__kurtosis", "__line_length", "__dom_freq", "__spec_"],
-    }
-    fam = st.selectbox("Famille de features", list(familles), key="ds_fam")
-    suf = familles[fam]
-    chans = sorted({c.split("__")[0] for c in feats if c.startswith("EEG")})
-    sel_ch = st.multiselect("Canaux", chans, default=chans[:8], key="ds_chans")
-    cols_corr = [c for c in feats if c.startswith("EEG")
-                 and any(c.endswith(s) for s in suf)
-                 and c.split("__")[0] in sel_ch]
-    if len(cols_corr) >= 2:
-        samp = fdf[cols_corr].sample(min(4000, len(fdf)), random_state=0)             if len(fdf) > 4000 else fdf[cols_corr]
-        cm = samp.corr(numeric_only=True)
-        figm = go.Figure(data=go.Heatmap(z=cm.values, x=cm.columns, y=cm.columns,
-                                         colorscale="RdBu_r", zmin=-1, zmax=1))
-        figm.update_layout(height=max(340, 14 * len(cols_corr)),
-                           title="{} features — {}".format(len(cols_corr), fam))
-        st.plotly_chart(figm, width='stretch')
-        hi = (cm.where(np.abs(cm) >= 0.90).stack()
-              .reset_index().rename(columns={0: "r", "level_0": "a", "level_1": "b"}))
-        hi = hi[hi["a"] < hi["b"]]
-        if len(hi):
-            st.warning("{} paires de features ont |r| ≥ 0.90 (multicolinéarité) : "
-                       "features redondantes, à filtrer (MI) ou à regrouper."
-                       .format(len(hi)))
-        else:
-            st.success("Aucune paire avec |r| ≥ 0.90 dans cette sélection.")
-    else:
-        st.info("Sélectionnez au moins 2 features.")
-
-
-# ---------------------------------------------------------------------------
-# Onglet 5 — Modèles
-# ---------------------------------------------------------------------------
-with tabs[4]:
-    st.header("Comparaison des modèles")
-    rand = get_results("results_random_extended.parquet")
-    if rand.empty:
-        rand = get_results("results_random_split.parquet")
-    gkf = get_results("results_groupkfold.parquet")
-    lopo = get_results("results_lopo.parquet")
-
-    st.subheader("Split aléatoire 80/20 (exigé — mais fuite par recouvrement)")
-    if not rand.empty:
-        st.dataframe(rand[["model", "accuracy", "precision", "recall", "f1", "mcc",
-                           "roc_auc", "pr_auc"]].round(3), width='stretch')
-    st.subheader("GroupKFold / LOPO (validation par patient — honnête)")
-    for tab in (gkf, lopo):
-        if not tab.empty:
-            grp = tab.groupby("model")[["f1", "pr_auc", "recall", "precision", "mcc"]].agg(["mean", "std"])
-            st.dataframe(grp.round(3), width='stretch')
-            break
-
-    sweep = get_results("threshold_sweep.parquet")
-    if not sweep.empty:
-        fig = go.Figure()
-        for col in ["precision", "recall", "f1", "mcc"]:
-            fig.add_trace(go.Scatter(x=sweep.threshold, y=sweep[col], name=col))
-        fig.update_layout(height=380, xaxis_title="Seuil de décision", yaxis_title="Métrique",
-                          title="Métriques fenêtre vs seuil")
-        st.plotly_chart(fig, width='stretch')
-
-    preds = get_predictions()
-    st.subheader("Performance par patient (LOPO)")
+    preds = get_predictions(model_choice)
+    th_perf = 0.75 if "EEGNet" in model_choice else 0.65
+    seuil_label = "seuil P0 par pli" if "tau_star" in preds.columns else f"seuil {th_perf}"
+    st.subheader(f"Performance par patient — {model_choice} ({seuil_label})")
     from sklearn.metrics import precision_score, recall_score, f1_score
     rows = []
     for pid, g in preds.groupby("patient"):
-        pr = (g["score"] >= 0.5).astype(int)
+        seuil_g = g["tau_star"] if "tau_star" in g.columns else th_perf
+        pr = (g["score"] >= seuil_g).astype(int)
         rows.append({"patient": pid, "n": len(g),
                      "precision": precision_score(g["label"], pr, zero_division=0),
                      "recall": recall_score(g["label"], pr, zero_division=0),
@@ -513,7 +334,8 @@ with tabs[4]:
 # ---------------------------------------------------------------------------
 with tabs[5]:
     st.header("Démo détection — rejouer le EEG")
-    preds = get_predictions()
+    preds = get_predictions(model_choice)
+    st.caption(f"Modèle actif : **{model_choice}**")
     gpred = preds[preds["patient"] == patient].sort_values("t_start")
     sel = seizures[seizures["Patient"].astype(str) == patient]
     true_ev = list(map(tuple, sel[["Debut_Sec", "Fin_Sec"]].to_numpy())) if len(sel) else []
@@ -522,9 +344,16 @@ with tabs[5]:
     sm = np.array([])
 
     c1, c2, c3 = st.columns(3)
-    seuil = c1.slider("Seuil de décision", 0.05, 0.95, 0.30, 0.05)
+    def_seuil = 0.75 if "EEGNet" in model_choice else 0.65
+    seuil = c1.slider("Seuil de décision", 0.05, 0.95, def_seuil, 0.05, key=f"demo_seuil_{model_choice}")
     lissage = c2.slider("Lissage (fenêtres)", 1, 15, 5, 2)
     min_dur = c3.slider("Durée minimale détectée (s)", 0.0, 10.0, 2.0, 0.5)
+
+    causal_mode = st.checkbox(
+        "Mode Causal Temps Réel (filtre médian causal glissant, alarme émise à t_start + 2,0 s)",
+        value=False,
+        help="Simule un traitement en ligne strict : aucun accès aux fenêtres futures et alarme datée à la fin de la fenêtre de 2 s."
+    )
 
     dur = float(rec_sig.shape[0] / rec_fs)
     t_curseur = st.slider("Curseur temporel (s)", 0.0, dur, 0.0, 0.5)
@@ -533,7 +362,8 @@ with tabs[5]:
         times = gpred["t_start"].to_numpy()
         sm, intervals = pp.postprocess(times, gpred["score"].to_numpy(),
                                        threshold=seuil, smooth_size=lissage,
-                                       min_gap_s=2.0, min_dur_s=min_dur)
+                                       min_gap_s=2.0, min_dur_s=min_dur,
+                                       causal=causal_mode, window_sec=2.0)
         fig = go.Figure()
         for i, (s, e) in enumerate(true_ev):
             fig.add_vrect(x0=s, x1=e, fillcolor="green", opacity=0.15, line_width=0)
@@ -616,11 +446,12 @@ with tabs[7]:
                "Réglages recalculés à la volée.")
 
     a1, a2, a3 = st.columns(3)
-    thr = a1.slider("Seuil de décision", 0.05, 0.95, 0.50, 0.05, key="ea_thr")
+    def_ea_thr = 0.75 if "EEGNet" in model_choice else 0.65
+    thr = a1.slider("Seuil de décision", 0.05, 0.95, def_ea_thr, 0.05, key=f"ea_thr_{model_choice}")
     sm = a2.slider("Lissage (fenêtres médianes)", 1, 15, 5, 2, key="ea_sm")
     mind = a3.slider("Durée minimale détectée (s)", 0.0, 8.0, 2.0, 0.5, key="ea_md")
 
-    ana = get_error_analysis(thr, sm, mind)
+    ana = get_error_analysis(thr, sm, mind, model_choice)
     w = ana["window"]
     e = ana["event"]
     m = ana["metrics"]

@@ -5,7 +5,7 @@
 <br/>
 
 <a href="https://github.com/chahmed12/eeg-absence-detection">
-  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=500&size=20&pause=1200&color=38BDF8&center=true&vCenter=true&width=760&lines=Du+signal+EEG+brut+%C3%A0+la+d%C3%A9tection+d'%C3%A9v%C3%A9nements;Validation+honn%C3%AAte+par+patient+(LOPO);19+patients+%C2%B7+256+Hz+%C2%B7+pipeline+reproductible;86%2C6+%25+des+crises+d%C3%A9tect%C3%A9es+%C2%B7+latence+0%2C9+s" alt="Typing SVG"/>
+  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=500&size=20&pause=1200&color=38BDF8&center=true&vCenter=true&width=760&lines=Du+signal+EEG+brut+%C3%A0+la+d%C3%A9tection+d'%C3%A9v%C3%A9nements;Validation+strictement+imbriqu%C3%A9e+par+patient;19+patients+%C2%B7+256+Hz+%C2%B7+pipeline+reproductible;93%2C9+%25+des+crises+d%C3%A9tect%C3%A9es+%C2%B7+latence+causale+4%2C5+s" alt="Typing SVG"/>
 </a>
 
 <br/><br/>
@@ -55,16 +55,19 @@ Il passe d'une classification **par fenêtre** à une **détection par événeme
 
 > [!IMPORTANT]
 > **Enjeu méthodologique central : ne pas surestimer les performances.**
-> Avec un fenêtrage à recouvrement de 50 %, un split aléatoire fait fuiter l'information entre train et test. Les performances retenues ici sont celles de la **validation par patient (LOPO)**.
+> Avec un fenêtrage à recouvrement de 50 %, un split aléatoire fait fuiter l'information entre train et test. Les performances retenues ici sont celles de la **validation par patient**, avec s?lection interne stricte pour P0.
 
 <table>
 <tr>
-<td align="center" width="25%"><h3>86,6 %</h3>des crises détectées</td>
-<td align="center" width="25%"><h3>0,9 s</h3>latence moyenne</td>
-<td align="center" width="25%"><h3>3,35</h3>faux positifs / heure</td>
-<td align="center" width="25%"><h3>0,74</h3>F1 en LOPO (MI top-250)</td>
+<td align="center" width="25%"><h3>93,9 %</h3>des crises détectées</td>
+<td align="center" width="25%"><h3>4,5 s</h3>latence causale</td>
+<td align="center" width="25%"><h3>4,55</h3>fausses alarmes / heure</td>
+<td align="center" width="25%"><h3>0,70</h3>F1 en validation imbriquée</td>
 </tr>
 </table>
+
+> [!IMPORTANT]
+> Le bandeau présente les résultats **P0** de LightGBM : filtrage amont causal (`sosfilt`), GroupKFold par patient, seuil et validation interne strictement imbriqués, puis test externe évalué une seule fois (22 enregistrements / 9,23 h). Les anciens chiffres 86,6 % / 0,9 s / 3,35 FA/h restent documentés comme historiques et ne sont pas reproduits par les artefacts actuels. Détails : [`report/RESULTS_SUMMARY.md`](report/RESULTS_SUMMARY.md) et [`report/EXPERIMENTS_LOG.md`](report/EXPERIMENTS_LOG.md).
 
 ---
 
@@ -82,7 +85,7 @@ L'objectif est un pipeline **reproductible**, du chargement brut des fichiers `.
 |---|---|
 | **Source** | Enregistrements EEG multi-canaux, format Micro Color EEG Scan (`*_0000d.mat`) |
 | **Annotations** | `Annotations MAJ.xlsx` (début / fin des crises par patient) |
-| **Cohorte** | 19 patients annotés sur 22 enregistrements (3 sans crise) |
+| **Cohorte** | 19 patients annotés (82 crises) sur 22 enregistrements, dont 3 enregistrements sans crise |
 | **Montages** | 12 à 23 canaux (19 EEG + canaux auxiliaires EMG / SLI / ECG), noms variables |
 | **Fréquence d'échantillonnage** | 256 Hz |
 | **Durées** | 1 173 s à 3 600 s, aucune valeur manquante |
@@ -134,7 +137,7 @@ Les fichiers `.mat` ne sont pas lisibles directement par `scipy.io.loadmat`. Un 
 
 <br/>
 
-- **Filtrage** : passe-bande Butterworth 0,5–40 Hz (phase nulle, `filtfilt`) + notch 50 Hz
+- **Filtrage causal** : passe-bande Butterworth 0,5–40 Hz (`sosfilt` avec conditions initiales) + notch 50 Hz, sans utilisation de samples futurs (`v3_causal`)
 - **Ciblage EEG** : seuls les canaux EEG alimentent l'extraction de features (EMG / ECG / SLI exclus pour éviter la contamination)
 - **Hétérogénéité** : malgré des montages différents (12 / 21 / 23 canaux), le projet s'appuie sur les **8 canaux EEG communs** à tous les enregistrements pour une approche généralisable
 
@@ -186,8 +189,8 @@ Pour chaque fenêtre et chaque canal EEG :
 ```mermaid
 %%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Arial'}}}%%
 flowchart LR
-  P["Probabilités<br/>par fenêtre"] --> T["Seuil<br/>0,2"]
-  T --> M["Fusion des fenêtres<br/>consécutives"]
+  P["Probabilités<br/>par fenêtre"] --> T["Seuil τ*<br/>validation interne"]
+  T --> M["Fusion causale des<br/>fenêtres consécutives"]
   M --> F["Filtrage des<br/>événements trop courts"]
   F --> I["Intervalles de crise<br/>reconstruits"]
   I --> E["Évaluation<br/>tolérance ± 2 s"]
@@ -210,6 +213,21 @@ Métriques événementielles : **taux de détection**, **faux positifs par heure
 > [!WARNING]
 > Le split aléatoire est présenté à titre comparatif. **Les performances en validation par patient sont celles à retenir comme réalistes.**
 
+### Validation P0 (causale et strictement imbriquée)
+
+| Expérience | Modèle | F1 fenêtre | Détection | FA/h | Latence causale |
+|---|---|---|:---:|:---:|:---:|
+| EXP-00 | LightGBM, 260 features | **0,700 ± 0,121** | **93,9 %** (77/82) | **4,55** | **4,46 s** |
+| EXP-01 | CNN 1D temporel | 0,488 ± 0,119 | 96,3 % | 19,50 | 3,33 s |
+| EXP-02 | CNN spatio-temporel | 0,527 ± 0,140 | 93,9 % | 19,93 | 2,96 s |
+| EXP-03 | EEGNet, seuil 0,5 | 0,522 ± 0,100 | 93,9 % | 11,48 | 1,19 s |
+| EXP-04 | EEGNet, seuil calibré | **0,643 ± 0,077** | **93,9 %** (77/82) | **8,88** | **3,86 s** |
+
+> [!NOTE]
+> Les métriques événementielles sont poolées sur 22 enregistrements / 9,23 h. LightGBM : F1 poolé 0,705, précision/rappel 0,706/0,703, 40 FP et 5 FN ; FA/h 4,55 causal (4,33 hors-ligne). EXP-04 : 82 FP, 5 FN ; moyenne des plis 92,4 ± 11,1 % et 8,29 ± 6,05 FA/h. Le seuil τ* (0,77 ± 0,15) est choisi uniquement sur la validation interne, jamais sur le test. Le balayage OOF global de EXP-04 (F1 0,673 à τ=0,94) est optimiste et ne doit pas être cité comme résultat principal.
+
+### Comparaison historique (avant correction P0)
+
 | Protocole | Modèle | F1 | Remarques |
 |---|---|:---:|---|
 | Split aléatoire stratifié (80/20) | LightGBM | **~0,87** | Optimiste : fuite par recouvrement des fenêtres |
@@ -226,13 +244,31 @@ LOPO + MI top-250         ██████████████████
 LOPO (base)               ███████████████████░░░░░░░░░░░  0,66
 ```
 
-**Détection par événement** (LightGBM, seuil 0,2, tolérance ±2 s)
+**Détection par événement** — chiffres historiques indicatifs (LightGBM, seuil 0,2, tolérance ±2 s)
 
 | Crises détectées | Faux positifs | Latence moyenne |
 |:---:|:---:|:---:|
 | **~86,6 %** | **~3,35 / h** | **~0,9 s** |
 
-Détails complets : [`report/RESULTS_SUMMARY.md`](report/RESULTS_SUMMARY.md)
+> [!NOTE]
+> Ces valeurs reposent sur 19 patients annotés / 8,06 h et un seuil fixé après observation de la courbe OOF. Sur les artefacts actuels (`cache/predictions.parquet`, 19 patients / 8,06 h), le seuil 0,20 reproduit 3,35 FA/h mais pas 86,6 % de détection (92,7 %). Le seuil 0,30 donne 87,8 % / 3,10 FA/h. La ligne 62,2 % / 1,24 FA/h est un RandomForest LOPO, pas LightGBM.
+
+### Extension Deep Learning & Arbitrage d'Ingénierie (EEGNet)
+
+Une démarche Deep Learning a été menée de bout en bout sur signaux bruts (8 canaux, 1 489 paramètres) sous **validation interne strictement imbriquée par patient** :
+- **Détection d'événements** : EEGNet calibré (EXP-04) détecte **93,9 %** des crises (77/82) avec **8,88 FA/h** en mode causal ; la moyenne des plis est $92,4\% \pm 11,1\%$ et $8,29 \pm 6,05\text{ FA/h}$. Le seuil $\tau^*=0,77 \pm 0,15$ est choisi uniquement sur la validation interne.
+- **Compromis non calibré/calibré** : EEGNet à seuil fixe 0,5 (EXP-03) donne $93,9\%$ de détection mais $11,48\text{ FA/h}$ ; la calibration par pli réduit les fausses alarmes à $8,88\text{ FA/h}$ tout en conservant $93,9\%$ de détection poolée.
+- **Latence causale** : $3,86\text{ s}$ pour EEGNet calibré et $4,46\text{ s}$ pour LightGBM, pondérées par événement. Les anciennes valeurs $5,26 \pm 0,79\text{ s}$ et $6,83 \pm 2,88\text{ s}$ sont des moyennes de moyennes par patient/pli et ne sont plus les chiffres principaux.
+- **Temps de calcul de bout en bout** : $10,35\text{ ms}$ (EEGNet) vs $16,81\text{ ms}$ (LightGBM) par fenêtre de 2 s (médiane sur 50 runs), sur **bruit synthétique** avec un **EEGNet non entraîné**. En inférence seule, LightGBM est plus rapide ($\approx 0,95\text{ ms}$ vs $1,46\text{ ms}$).
+- **Matrice d'arbitrage** : détaillée selon 7 dimensions d'ingénierie dans [`report/EXPERIMENTS_LOG.md`](report/EXPERIMENTS_LOG.md).
+
+> [!NOTE]
+> Le protocole P0 est terminé : filtrage amont causal (`sosfilt`), post-traitement causal sans fusion rétroactive des trous, early stopping et sélection du seuil sur validation interne, test externe évalué une seule fois. Les résultats restent limités par la taille de cohorte et nécessitent une validation externe.
+
+> [!IMPORTANT]
+> **Décision finale d'architecture** : LightGBM EXP-00 est le modèle de référence retenu pour la détection ; EEGNet EXP-04 est l'extension Deep Learning retenue pour le monitoring embarqué. EEGNet est plus compact et plus rapide de bout en bout, mais LightGBM reste plus performant et émet moins de fausses alarmes.
+
+Détails complets : [`report/RESULTS_SUMMARY.md`](report/RESULTS_SUMMARY.md) et [`report/EXPERIMENTS_LOG.md`](report/EXPERIMENTS_LOG.md)
 
 <!--
 Ajoutez ici vos figures (décommentez une fois les fichiers présents) :
@@ -307,6 +343,8 @@ python scripts/scripts_step4_detection.py            # Détection par événemen
 python scripts/scripts_step5_models_explain.py       # Modèles étendus + explicabilité
 python scripts/scripts_step5_improvements.py         # MI, SMOTE, ablation, seuils
 python scripts/scripts_step5_window_sensitivity.py   # Sensibilité fenêtre / recouvrement
+python scripts/scripts_step6_exp00_lightgbm_nested.py # LightGBM P0 strictement imbriqué
+python scripts/export_app_predictions.py             # Export des prédictions pour Streamlit
 ```
 
 ### 5. Tests & Couverture
@@ -324,9 +362,9 @@ eeg-absence-detection/
 ├── .github/workflows/ # Pipeline CI GitHub Actions (multi-OS, tests & lint)
 ├── src/               # Code réutilisable (io, preprocess, features, models, evaluation, postprocess, viz)
 ├── notebooks/         # Notebooks pédagogiques 01-06 (annotés avec notes d'architecture)
-├── scripts/           # Scripts reproductibles du pipeline (step1 → step5)
+├── scripts/           # Scripts reproductibles du pipeline (step1 → step6, P0 inclus)
 ├── app/               # Application Streamlit de démonstration
-├── tests/             # 107 tests unitaires et d'intégration (pytest, conftest)
+├── tests/             # 130 fonctions de test unitaires et d'intégration (pytest, conftest)
 ├── data/              # Instructions sur les données (pas de données brutes)
 ├── assets/            # Bannière animée et captures pour le README
 ├── report/            # Résultats synthétiques + figures + rapport coverage HTML
@@ -347,22 +385,25 @@ eeg-absence-detection/
 
 ### Limites
 
-- **Effectif réduit** : 19 patients annotés, résultats à confirmer sur un jeu plus large
+- **Effectif réduit** : 19 patients annotés (22 enregistrements, dont 3 sans crise), résultats à confirmer sur un jeu plus large
 - **Montages hétérogènes** : gestion rigoureuse des canaux manquants (atténuée par les 8 canaux communs)
 - **Déséquilibre extrême** : on privilégie Precision / Recall / F1 plutôt que l'Accuracy
-- **Seuil empirique** : le seuil 0,2 est optimisé sur ce jeu, une validation plus poussée est nécessaire
+- **Chiffres historiques non traçables** : les 86,6 % / 3,35 FA/h restent archivés mais ne sont pas reproduits par les artefacts actuels ; les résultats P0 les remplacent
+- **Sélection P0 stricte** : seuil, early stopping et validation interne sont sélectionnés sans le pli de test. Limite restante : le seuil est choisi sur des métriques événementielles rétrospectives de validation interne, pas sur une estimation prospective
+- **Causalité P0** : filtrage amont et post-traitement causal corrigés ; `merge_gaps` reste disponible uniquement pour l'analyse rétrospective
+- **Agrégation des métriques** : les latences principales sont pondérées par événement ; les dénominateurs FA/h historiques diffèrent (9,23 h pour 22 enregistrements vs 8,06 h pour 19 annotés)
 - **Généralisation** : une évaluation prospective / externe reste à faire
 
 </td>
 <td width="50%" valign="top">
 
-### Perspectives
+### Perspectives & Extensions Réalisées
 
-- Fusion événementielle par **CRF / HMM**
-- **CNN temporel** directement sur les fenêtres
-- **Explicabilité** canal / bande pour l'interprétation clinique
-- Validation sur une **cohorte externe**
-- Calibration du seuil par patient
+- **Deep Learning empirique** : progression mesurée CNN 1D $\to$ Spatio-temporel $\to$ **EEGNet** (1 489 paramètres), désormais évaluée avec validation interne strictement imbriquée (EXP-04 : F1 0,643, 93,9 % de détection, 8,88 FA/h ; voir [`report/EXPERIMENTS_LOG.md`](report/EXPERIMENTS_LOG.md))
+- **Démonstrateur Streamlit multi-modèles** : bascule en direct entre la baseline LightGBM et EEGNet
+- Fusion événementielle avancée par **CRF / HMM**
+- **Explicabilité** spatiale (ablations contrôlées par canal)
+- Validation prospective sur une **cohorte clinique externe**
 
 </td>
 </tr>
