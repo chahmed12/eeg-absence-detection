@@ -13,3 +13,5 @@
 - 05_channel_topomap.png
 - 05_top_features.png
 - 05_window_overlap_sensitivity.png
+- 07_architecture_globale.png
+- 07_architecture_dl_eegnet.png

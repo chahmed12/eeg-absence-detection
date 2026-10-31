@@ -12,6 +12,10 @@ $$\text{Observation} \longrightarrow \text{Hypothèse testable} \longrightarrow 
 > - Le filtrage amont utilise `sosfilt` (causal, état initialisé) et le post-traitement causal ne fusionne plus rétroactivement les trous.
 > - Les résultats ci-dessous remplacent les chiffres exploratoires antérieurs. La ligne **Random Forest (LOPO)** reste archivée séparément : protocole *Leave-One-Patient-Out* à 19 plis et 8,06 h annotées, non comparable au GroupKFold 22 enregistrements / 9,23 h.
 
+<p align="center">
+  <img src="figures/07_architecture_globale.svg" alt="Architecture globale du projet P0 : données, prétraitement causal, validation imbriquée, LightGBM/EEGNet, décision, évaluation et restitution" width="100%"/>
+</p>
+
 ---
 
 ## 📊 Étape 0 — La Référence (Baseline Machine Learning Classique)
@@ -146,6 +150,11 @@ Avant toute modélisation neuronale, les performances du pipeline existant (feat
   - **Tête Dense** : Linear(256, 1) (257 params).
   - **Nombre total de paramètres vérifié** : **1 489 paramètres exacts** (tous entraînables).
   - **Entraînement** : 10 époques par fold sur CPU, Adam `lr=1e-3`, `weight_decay=1e-4`, `pos_weight=~27.2` calculé sur le train de chaque pli.
+
+<p align="center">
+  <img src="figures/07_architecture_dl_eegnet.svg" alt="Architecture finale EEGNet EXP-04 avec formes de tenseurs, blocs convolutifs et protocole d'entraînement P0" width="100%"/>
+</p>
+
 * **Protocole d'évaluation P0** :
   - Strictement identique : **GroupKFold 5 plis par patient**, validation interne par patient, FoldScaler train-only, filtrage et post-traitement causaux.
   - Seuil fixe $\tau = 0,5$ pour cette expérience ; la calibration est réservée à EXP-04.

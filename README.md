@@ -97,27 +97,12 @@ L'objectif est un pipeline **reproductible**, du chargement brut des fichiers `.
 
 ## Pipeline
 
-```mermaid
-%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Arial','primaryColor':'#e0f2fe','primaryBorderColor':'#0284c7','lineColor':'#64748b'}}}%%
-flowchart LR
-  A["Données brutes<br/>.mat MCOS"] --> B["Lecture et<br/>reconstitution"]
-  B --> C["Pré-traitement<br/>0,5–40 Hz + notch 50 Hz"]
-  C --> D["Fenêtrage<br/>2 s · recouvrement 50 %"]
-  D --> E["Extraction de features<br/>temporel · spectral · Hjorth<br/>entropie · synchronie"]
-  E --> F["Modèles ML<br/>DT · RF · KNN · SVM · LightGBM"]
-  F --> G["Post-traitement<br/>fusion + seuillage"]
-  G --> H["Détection par événement<br/>intervalles + métriques"]
-  H --> I["Évaluation honnête<br/>LOPO / GroupKFold"]
+<p align="center">
+  <img src="report/figures/07_architecture_globale.svg" alt="Architecture globale du projet P0 : données, prétraitement causal, validation imbriquée, LightGBM/EEGNet, post-traitement causal, évaluation et restitution" width="100%"/>
+</p>
 
-  classDef data fill:#fef3c7,stroke:#d97706,color:#78350f;
-  classDef proc fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e;
-  classDef ml fill:#ede9fe,stroke:#7c3aed,color:#4c1d95;
-  classDef out fill:#dcfce7,stroke:#16a34a,color:#14532d;
-  class A data;
-  class B,C,D,E proc;
-  class F,G ml;
-  class H,I out;
-```
+> [!NOTE]
+> Schéma disponible aussi en PNG haute résolution : [`report/figures/07_architecture_globale.png`](report/figures/07_architecture_globale.png). Le schéma détaillé d'EEGNet est dans [`report/figures/07_architecture_dl_eegnet.svg`](report/figures/07_architecture_dl_eegnet.svg).
 
 ---
 
@@ -256,6 +241,11 @@ LOPO (base)               ██████████████████
 ### Extension Deep Learning & Arbitrage d'Ingénierie (EEGNet)
 
 Une démarche Deep Learning a été menée de bout en bout sur signaux bruts (8 canaux, 1 489 paramètres) sous **validation interne strictement imbriquée par patient** :
+
+<p align="center">
+  <img src="report/figures/07_architecture_dl_eegnet.svg" alt="Architecture finale EEGNet EXP-04 : entrée 8 canaux × 512 échantillons, blocs temporel, spatial depthwise, séparable et pointwise, classification" width="100%"/>
+</p>
+
 - **Détection d'événements** : EEGNet calibré (EXP-04) détecte **93,9 %** des crises (77/82) avec **8,88 FA/h** en mode causal ; la moyenne des plis est $92,4\% \pm 11,1\%$ et $8,29 \pm 6,05\text{ FA/h}$. Le seuil $\tau^*=0,77 \pm 0,15$ est choisi uniquement sur la validation interne.
 - **Compromis non calibré/calibré** : EEGNet à seuil fixe 0,5 (EXP-03) donne $93,9\%$ de détection mais $11,48\text{ FA/h}$ ; la calibration par pli réduit les fausses alarmes à $8,88\text{ FA/h}$ tout en conservant $93,9\%$ de détection poolée.
 - **Latence causale** : $3,86\text{ s}$ pour EEGNet calibré et $4,46\text{ s}$ pour LightGBM, pondérées par événement. Les anciennes valeurs $5,26 \pm 0,79\text{ s}$ et $6,83 \pm 2,88\text{ s}$ sont des moyennes de moyennes par patient/pli et ne sont plus les chiffres principaux.
@@ -345,6 +335,7 @@ python scripts/scripts_step5_improvements.py         # MI, SMOTE, ablation, seui
 python scripts/scripts_step5_window_sensitivity.py   # Sensibilité fenêtre / recouvrement
 python scripts/scripts_step6_exp00_lightgbm_nested.py # LightGBM P0 strictement imbriqué
 python scripts/export_app_predictions.py             # Export des prédictions pour Streamlit
+python scripts/generate_architecture_figures.py      # Schémas globaux et EEGNet
 ```
 
 ### 5. Tests & Couverture
